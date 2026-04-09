@@ -31,6 +31,9 @@ jobs:
     concurrency:
       group: prebuild-release
       cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: write
 
     steps:
       # ── Determine which tag to build ─────────────────────────────────────────
