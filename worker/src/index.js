@@ -80,9 +80,10 @@ async function handleLaunch(request, env, respond) {
   }
 
   const imageRef = `ghcr.io/${env.GHCR_OWNER}/openfront-replay-launcher:${sha}`;
+  const domain = new URL(request.url).hostname;
   let machine;
   try {
-    machine = await createMachine(env, { matchId, sha, imageRef });
+    machine = await createMachine(env, { matchId, sha, imageRef, domain });
   } catch (e) {
     return respond({ error: `Failed to create game machine: ${e.message}` }, 502);
   }
@@ -258,7 +259,7 @@ async function imageExistsInRegistry(env, sha) {
 
 // ─── Fly Machines API ─────────────────────────────────────────────────────────
 
-async function createMachine(env, { matchId, sha, imageRef }) {
+async function createMachine(env, { matchId, sha, imageRef, domain }) {
   return flyApi(env, "POST", `/apps/${env.FLY_GAMES_APP}/machines`, {
     name: `game-${sha.slice(0, 7)}-${Date.now()}`,
     config: {
@@ -276,7 +277,14 @@ async function createMachine(env, { matchId, sha, imageRef }) {
         autostart: true,
         min_machines_running: 0,
       }],
-      env: { GAME_ENV: "prod", GIT_COMMIT: sha },
+      env: {
+        GAME_ENV: "prod",
+        GIT_COMMIT: sha,
+        DOMAIN: domain,
+        SUBDOMAIN: domain,
+        CF_API_TOKEN: env.CF_API_TOKEN,
+        CF_ACCOUNT_ID: env.CF_ACCOUNT_ID,
+      },
       metadata: { match_id: matchId, commit_sha: sha },
     },
   });

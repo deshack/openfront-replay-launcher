@@ -22,3 +22,5 @@ enabled = false
 # Secrets — set with:
 #   wrangler secret put FLY_API_TOKEN
 #   wrangler secret put FLY_GAMES_APP
+#   wrangler secret put CF_API_TOKEN
+#   wrangler secret put CF_ACCOUNT_ID
