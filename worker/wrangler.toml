@@ -1,0 +1,17 @@
+name = "openfront-launcher"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# KV namespace for session state
+# Create with: wrangler kv namespace create SESSIONS
+# Then paste the resulting id below
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+
+# Secrets — set with:
+#   wrangler secret put FLY_API_TOKEN
+#   wrangler secret put FLY_GAMES_APP
+#   wrangler secret put FLY_BUILDER_APP
+#   wrangler secret put FLY_BUILDER_MACHINE_ID
+#   wrangler secret put CALLBACK_SECRET

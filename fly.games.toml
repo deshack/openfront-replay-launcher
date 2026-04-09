@@ -1,0 +1,10 @@
+# fly.games.toml
+# This app hosts the ephemeral game machines.
+# It doesn't need a Dockerfile — machines are created via API with their own images.
+# Just create the app shell so it has a name and certificate.
+#
+# Run once:
+#   fly apps create openfront-games
+#   fly certs add openfront-games.fly.dev --app openfront-games
+#
+# No deploy needed — machines are created/destroyed dynamically via the builder.

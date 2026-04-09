@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Wrangler
+worker/.wrangler/
+.wrangler/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.iml

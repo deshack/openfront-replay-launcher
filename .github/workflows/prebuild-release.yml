@@ -1,0 +1,173 @@
+name: Pre-build OpenFrontIO release image
+
+# Triggers when openfrontio/OpenFrontIO publishes a new release tag.
+#
+# Because GitHub Actions can only listen to events in their own repo,
+# we poll the OpenFrontIO releases API on a schedule and check for new tags.
+# When a new tag is found we build its image and push to the Fly registry.
+#
+# Alternatively, if you can add a webhook to the OpenFrontIO repo
+# (e.g. you're a contributor), replace the schedule trigger with:
+#   on:
+#     repository_dispatch:
+#       types: [openfront-release]
+# ...and fire it from their release workflow.
+
+on:
+  schedule:
+    # Check for new OpenFrontIO releases every 15 minutes
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Specific OpenFrontIO tag to build (e.g. v1.2.3). Leave empty to auto-detect latest."
+        required: false
+        type: string
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: prebuild-release
+      cancel-in-progress: false
+
+    steps:
+      # ── Determine which tag to build ─────────────────────────────────────────
+      - name: Resolve target tag and SHA
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          GH_AUTH="-H \"Authorization: Bearer $GITHUB_TOKEN\""
+
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            # Fetch the latest release tag from OpenFrontIO
+            TAG=$(curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
+              https://api.github.com/repos/openfrontio/OpenFrontIO/releases/latest \
+              | jq -r '.tag_name')
+          fi
+
+          if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+            echo "Could not resolve tag — aborting"
+            exit 1
+          fi
+
+          # Resolve the tag to a commit SHA
+          REF_JSON=$(curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
+            "https://api.github.com/repos/openfrontio/OpenFrontIO/git/refs/tags/${TAG}")
+          SHA=$(echo "$REF_JSON" | jq -r '.object.sha')
+          OBJ_TYPE=$(echo "$REF_JSON" | jq -r '.object.type')
+
+          # If it's an annotated tag, dereference to the commit
+          if [ "$OBJ_TYPE" = "tag" ]; then
+            SHA=$(curl -sf -H "Authorization: Bearer $GITHUB_TOKEN" \
+              "https://api.github.com/repos/openfrontio/OpenFrontIO/git/tags/${SHA}" \
+              | jq -r '.object.sha')
+          fi
+
+          echo "TAG=$TAG"   >> $GITHUB_OUTPUT
+          echo "SHA=$SHA"   >> $GITHUB_OUTPUT
+          echo "Resolved $TAG → $SHA"
+
+      # ── Check if image already exists in registry ─────────────────────────────
+      - name: Check Fly registry for existing image
+        id: check
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_REGISTRY_APP: ${{ vars.FLY_REGISTRY_APP }}
+          SHA: ${{ steps.resolve.outputs.SHA }}
+        run: |
+          HTTP=$(curl -so /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer $FLY_API_TOKEN" \
+            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+            "https://registry.fly.io/v2/${FLY_REGISTRY_APP}/openfront/manifests/${SHA}")
+
+          if [ "$HTTP" = "200" ]; then
+            echo "Image already exists for $SHA — nothing to do"
+            echo "EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "Image not found (HTTP $HTTP) — will build"
+            echo "EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ── Clone OpenFrontIO at that SHA ─────────────────────────────────────────
+      - name: Clone OpenFrontIO
+        if: steps.check.outputs.EXISTS == 'false'
+        env:
+          SHA: ${{ steps.resolve.outputs.SHA }}
+        run: |
+          git clone --recurse-submodules --shallow-submodules \
+            https://github.com/openfrontio/OpenFrontIO.git openfront
+          cd openfront
+          git fetch --depth=1 origin $SHA
+          git checkout $SHA
+          git submodule update --init --recursive
+
+      # ── Set up Docker Buildx with layer cache ─────────────────────────────────
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.EXISTS == 'false'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        if: steps.check.outputs.EXISTS == 'false'
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          # Cache key includes the SHA so different commits get independent caches,
+          # but we restore from the most recent cache for any tag to share base layers.
+          key: buildx-openfront-${{ steps.resolve.outputs.SHA }}
+          restore-keys: |
+            buildx-openfront-
+
+      # ── Log in to Fly registry ────────────────────────────────────────────────
+      - name: Log in to Fly registry
+        if: steps.check.outputs.EXISTS == 'false'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          echo "$FLY_API_TOKEN" | docker login registry.fly.io \
+            --username x --password-stdin
+
+      # ── Build and push ────────────────────────────────────────────────────────
+      - name: Build and push image
+        if: steps.check.outputs.EXISTS == 'false'
+        env:
+          FLY_REGISTRY_APP: ${{ vars.FLY_REGISTRY_APP }}
+          SHA: ${{ steps.resolve.outputs.SHA }}
+          TAG: ${{ steps.resolve.outputs.TAG }}
+        run: |
+          IMAGE="registry.fly.io/${FLY_REGISTRY_APP}/openfront:${SHA}"
+
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg GIT_COMMIT=$SHA \
+            --build-arg GAME_ENV=prod \
+            --tag "$IMAGE" \
+            --cache-from type=local,src=/tmp/.buildx-cache \
+            --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \
+            --push \
+            ./openfront
+
+          # Rotate cache (prevents unbounded growth)
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+          echo "✅ Pushed $IMAGE"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.resolve.outputs.TAG }}
+          SHA: ${{ steps.resolve.outputs.SHA }}
+          EXISTS: ${{ steps.check.outputs.EXISTS }}
+        run: |
+          if [ "$EXISTS" = "true" ]; then
+            echo "### ⏭️ Skipped — image already existed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ✅ Built and pushed" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Tag:** \`$TAG\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **SHA:** \`$SHA\`" >> $GITHUB_STEP_SUMMARY
