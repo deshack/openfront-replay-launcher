@@ -278,7 +278,7 @@ async function createMachine(env, { matchId, sha, imageRef, domain }) {
         min_machines_running: 0,
       }],
       env: {
-        GAME_ENV: "prod",
+        GAME_ENV: "dev",
         GIT_COMMIT: sha,
         DOMAIN: domain,
         SUBDOMAIN: domain,
