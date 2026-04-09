@@ -58,7 +58,7 @@ async function handleLaunch(request, env, respond) {
   // KV has no atomic CAS, but this short-lived lock closes the race window.
   const lockKey = `lock-${matchId}`;
   if (await env.SESSIONS.get(lockKey)) return respond({ error: "Launch already in progress" }, 429);
-  await env.SESSIONS.put(lockKey, "1", { expirationTtl: 30 });
+  await env.SESSIONS.put(lockKey, "1", { expirationTtl: 60 });
 
   // Fetch commit SHA from match API
   let sha;

@@ -9,6 +9,13 @@ compatibility_date = "2024-09-23"
 binding = "SESSIONS"
 id = "0e889a090a3a4753925b04daf4ec0a23"
 
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
+
+[observability.traces]
+enabled = false
 # Secrets — set with:
 #   wrangler secret put FLY_API_TOKEN
 #   wrangler secret put FLY_GAMES_APP
