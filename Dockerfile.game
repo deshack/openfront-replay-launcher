@@ -35,7 +35,7 @@ COPY --from=build /usr/src/app/static ./static
 RUN rm -rf ./resources/maps
 
 ARG GIT_COMMIT=unknown
-ENV GIT_COMMIT=$GIT_COMMIT GAME_ENV=dev
+ENV GIT_COMMIT=$GIT_COMMIT GAME_ENV=dev API_DOMAIN=api.openfront.io
 
 EXPOSE 3000
 CMD ["npm", "run", "start:server-dev"]
