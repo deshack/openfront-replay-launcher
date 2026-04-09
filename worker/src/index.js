@@ -281,7 +281,7 @@ async function createMachine(env, { matchId, sha, imageRef, domain }) {
         GAME_ENV: "dev",
         GIT_COMMIT: sha,
         DOMAIN: domain,
-        SUBDOMAIN: domain,
+        SUBDOMAIN: "replay",
         CF_API_TOKEN: env.CF_API_TOKEN,
         CF_ACCOUNT_ID: env.CF_ACCOUNT_ID,
       },
