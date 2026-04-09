@@ -15,8 +15,8 @@ name: Pre-build OpenFrontIO release image
 
 on:
   schedule:
-    # Check for new OpenFrontIO releases every 15 minutes
-    - cron: "*/15 * * * *"
+    # Check for new OpenFrontIO releases every day
+    - cron: "0 6 * * *"
   workflow_dispatch:
     inputs:
       tag:
