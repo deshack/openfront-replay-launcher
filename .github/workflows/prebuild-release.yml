@@ -154,7 +154,7 @@ jobs:
           docker buildx build \
             --platform linux/amd64 \
             --build-arg GIT_COMMIT=$SHA \
-            --build-arg GAME_ENV=prod \
+            --build-arg GAME_ENV=dev \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --tag "$IMAGE" \
             --cache-from type=local,src=/tmp/.buildx-cache \
