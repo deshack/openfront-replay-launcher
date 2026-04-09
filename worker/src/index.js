@@ -250,7 +250,7 @@ async function imageExistsInRegistry(env, sha) {
       }
     );
 
-    console.debug("ghcr.io manifest check:", res.status, res.statusText);
+    console.debug("ghcr.io manifest check for sha:", sha, res.status, res.statusText);
 
     return res.ok;
   } catch { return false; }
