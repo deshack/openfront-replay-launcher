@@ -42,11 +42,8 @@ Game live in ~20 seconds
 ### 1. Create Fly apps
 
 ```sh
-fly apps create openfront-builder
 fly apps create openfront-games
 ```
-
-`openfront-builder` is only used as a registry namespace — no machines needed. `openfront-games` is where game machines are created dynamically.
 
 ### 2. Set GitHub Actions secrets and variables
 
@@ -56,7 +53,7 @@ In your repo → Settings → Secrets and variables → Actions:
 - `FLY_API_TOKEN` — `fly tokens create deploy`
 
 **Variables** (non-sensitive):
-- `FLY_REGISTRY_APP` — `openfront-builder`
+- `FLY_REGISTRY_APP` — `openfront-games`
 
 ### 3. Create the Cloudflare KV namespace
 
@@ -106,7 +103,7 @@ Run the **Pre-build OpenFrontIO release image** workflow manually in GitHub Acti
 ## How image caching works
 
 Images are stored in Fly's registry under:
-`registry.fly.io/openfront-builder/openfront:<sha>`
+`registry.fly.io/openfront-games/openfront:<sha>`
 
 GitHub Actions polls OpenFrontIO releases daily. On a new tag it resolves the SHA, checks whether the image already exists in the registry, and builds + pushes if not. Matches replayed on released versions find their image already cached.
 

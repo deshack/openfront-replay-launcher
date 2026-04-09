@@ -96,7 +96,7 @@ UI redirects user to /game/:matchId (Worker proxy → fly-replay → game machin
 ### Cloudflare Worker vars (`wrangler.toml [vars]`)
 | Name | Value |
 |---|---|
-| `FLY_REGISTRY_APP` | `openfront-builder` |
+| `FLY_REGISTRY_APP` | `openfront-games` |
 
 ### Cloudflare Worker secrets (`wrangler secret put`)
 | Name | Description |
@@ -117,13 +117,13 @@ UI redirects user to /game/:matchId (Worker proxy → fly-replay → game machin
 ### GitHub Actions variables (non-secret)
 | Name | Description |
 |---|---|
-| `FLY_REGISTRY_APP` | `openfront-builder` |
+| `FLY_REGISTRY_APP` | `openfront-games` |
 
 ---
 
 ## Key implementation details
 
-- **Image ref pattern:** `registry.fly.io/openfront-builder/openfront:<sha>`
+- **Image ref pattern:** `registry.fly.io/openfront-games/openfront:<sha>`
 - **Registry check** uses the Docker v2 manifest API: `GET https://registry.fly.io/v2/<app>/openfront/manifests/<sha>` with `Authorization: Bearer <FLY_API_TOKEN>`
 - **OpenFrontIO's nginx** listens on port 80 inside the container — game machines use `internal_port: 80`
 - **Production SHA cache key** in KV: `__latest_release_sha__`, TTL 15 minutes; fails open (if GitHub unreachable, check is skipped)

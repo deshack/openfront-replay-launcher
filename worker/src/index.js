@@ -3,7 +3,7 @@
  *
  * KV namespace binding:  SESSIONS   (key: matchId, value: JSON session)
  * Var bindings (set in wrangler.toml [vars]):
- *   FLY_REGISTRY_APP        Fly app name whose registry holds pre-built images  (e.g. "openfront-builder")
+ *   FLY_REGISTRY_APP        Fly app name whose registry holds pre-built images  (e.g. "openfront-games")
  * Secret bindings (set via wrangler secret put):
  *   FLY_API_TOKEN           Fly.io API token
  *   FLY_GAMES_APP           Fly app name for game machines    (e.g. "openfront-games")

@@ -24,11 +24,11 @@ Two components + GitHub Actions:
 
 2. **`openfront-games` Fly app** — Shell app only; no deployments. Game machines are created/destroyed dynamically via Fly Machines API. `auto_destroy: true` is set on each machine.
 
-3. **`.github/workflows/prebuild-release.yml`** — Polls OpenFrontIO releases daily; pre-builds images for new tags and pushes to `registry.fly.io/openfront-builder/openfront:<sha>`.
+3. **`.github/workflows/prebuild-release.yml`** — Polls OpenFrontIO releases daily; pre-builds images for new tags and pushes to `registry.fly.io/openfront-games/openfront:<sha>`.
 
 ## Key implementation constraints
 
-- Docker image ref pattern: `registry.fly.io/openfront-builder/openfront:<sha>`
+- Docker image ref pattern: `registry.fly.io/openfront-games/openfront:<sha>`
 - Registry check uses Docker v2 manifest API with Fly API token as Bearer
 - If no pre-built image exists for a SHA, returns `{ status: "unavailable" }` — no on-demand build path
 - `FLY_REGISTRY_APP` is a `[vars]` entry in `wrangler.toml` (not a secret)
