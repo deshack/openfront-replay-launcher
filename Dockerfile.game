@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+# Builds OpenFrontIO in dev mode (GAME_ENV=dev) so the server starts without
+# Cloudflare credentials. Serves client assets + game API on port 3000.
+
+FROM node:24-slim AS build
+WORKDIR /usr/src/app
+ENV HUSKY=0
+
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci
+
+COPY tsconfig.json vite.config.ts eslint.config.js index.html ./
+COPY resources ./resources
+COPY proprietary ./proprietary
+COPY src ./src
+
+ARG GIT_COMMIT=unknown
+ARG API_DOMAIN=api.openfront.io
+ENV GIT_COMMIT=$GIT_COMMIT GAME_ENV=dev API_DOMAIN=$API_DOMAIN
+
+RUN npm run build-dev
+
+# Runtime: prod deps only
+FROM node:24-slim AS prod-deps
+ENV HUSKY=0 NPM_CONFIG_IGNORE_SCRIPTS=1
+WORKDIR /usr/src/app
+COPY package*.json ./
+RUN --mount=type=cache,target=/root/.npm npm ci --omit=dev
+
+FROM node:24-slim
+WORKDIR /usr/src/app
+
+COPY --from=prod-deps /usr/src/app/node_modules ./node_modules
+COPY package*.json tsconfig.json ./
+COPY src ./src
+COPY resources ./resources
+COPY --from=build /usr/src/app/static ./static
+
+RUN rm -rf ./resources/maps
+
+ARG GIT_COMMIT=unknown
+ENV GIT_COMMIT=$GIT_COMMIT GAME_ENV=dev
+
+EXPOSE 3000
+CMD ["npm", "run", "start:server-dev"]

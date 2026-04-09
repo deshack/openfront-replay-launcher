@@ -36,6 +36,10 @@ jobs:
       packages: write
 
     steps:
+      # ── Check out this repo (provides Dockerfile.game) ────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
       # ── Determine which tag to build ─────────────────────────────────────────
       - name: Resolve target tag and SHA
         id: resolve
@@ -110,12 +114,10 @@ jobs:
         env:
           SHA: ${{ steps.resolve.outputs.SHA }}
         run: |
-          git clone --recurse-submodules --shallow-submodules \
-            https://github.com/openfrontio/OpenFrontIO.git openfront
+          git clone https://github.com/openfrontio/OpenFrontIO.git openfront
           cd openfront
           git fetch --depth=1 origin $SHA
           git checkout $SHA
-          git submodule update --init --recursive
 
       # ── Set up Docker Buildx with layer cache ─────────────────────────────────
       - name: Set up Docker Buildx
@@ -151,10 +153,13 @@ jobs:
         run: |
           IMAGE="ghcr.io/${{ github.repository_owner }}/openfront-replay-launcher:${SHA}"
 
+          # Use our custom Dockerfile (checked out from this repo)
+          cp Dockerfile.game openfront/Dockerfile.game
+
           docker buildx build \
             --platform linux/amd64 \
+            --file openfront/Dockerfile.game \
             --build-arg GIT_COMMIT=$SHA \
-            --build-arg GAME_ENV=dev \
             --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --tag "$IMAGE" \
             --cache-from type=local,src=/tmp/.buildx-cache \

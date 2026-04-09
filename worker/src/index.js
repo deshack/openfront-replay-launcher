@@ -267,7 +267,7 @@ async function createMachine(env, { matchId, sha, imageRef, domain }) {
       auto_destroy: true,
       guest: { cpu_kind: "shared", cpus: 1, memory_mb: 512 },
       services: [{
-        internal_port: 80,
+        internal_port: 3000,
         protocol: "tcp",
         ports: [
           { port: 443, handlers: ["tls", "http"] },
