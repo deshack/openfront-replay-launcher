@@ -11,6 +11,7 @@ id = "0e889a090a3a4753925b04daf4ec0a23"
 
 [vars]
 GHCR_OWNER = "deshack"
+FLY_GAMES_APP = "openfront-games"
 
 [observability]
 [observability.logs]
