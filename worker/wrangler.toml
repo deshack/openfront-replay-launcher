@@ -7,7 +7,7 @@ compatibility_date = "2024-09-23"
 # Then paste the resulting id below
 [[kv_namespaces]]
 binding = "SESSIONS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "0e889a090a3a4753925b04daf4ec0a23"
 
 # Secrets — set with:
 #   wrangler secret put FLY_API_TOKEN
