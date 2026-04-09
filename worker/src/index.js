@@ -245,7 +245,7 @@ async function imageExistsInRegistry(env, sha) {
       {
         headers: {
           Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.docker.distribution.manifest.v2+json",
+          Accept: "application/vnd.docker.distribution.manifest.v2+json,application/vnd.oci.image.index.v1+json",
         },
       }
     );
