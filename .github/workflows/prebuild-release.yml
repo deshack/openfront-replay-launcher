@@ -74,17 +74,24 @@ jobs:
           echo "Resolved $TAG → $SHA"
 
       # ── Check if image already exists in registry ─────────────────────────────
-      - name: Check Fly registry for existing image
+      - name: Check ghcr.io for existing image
         id: check
         env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          FLY_REGISTRY_APP: ${{ vars.FLY_REGISTRY_APP }}
           SHA: ${{ steps.resolve.outputs.SHA }}
         run: |
-          HTTP=$(curl -so /dev/null -w "%{http_code}" \
-            -H "Authorization: Bearer $FLY_API_TOKEN" \
-            -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-            "https://registry.fly.io/v2/${FLY_REGISTRY_APP}/openfront/manifests/${SHA}")
+          OWNER="${{ github.repository_owner }}"
+          TOKEN=$(curl -sf \
+            "https://ghcr.io/token?service=ghcr.io&scope=repository:${OWNER}/openfront:pull" \
+            | jq -r '.token // empty')
+
+          if [ -n "$TOKEN" ]; then
+            HTTP=$(curl -so /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+              "https://ghcr.io/v2/${OWNER}/openfront/manifests/${SHA}")
+          else
+            HTTP="000"
+          fi
 
           if [ "$HTTP" = "200" ]; then
             echo "Image already exists for $SHA — nothing to do"
@@ -123,29 +130,29 @@ jobs:
           restore-keys: |
             buildx-openfront-
 
-      # ── Log in to Fly registry ────────────────────────────────────────────────
-      - name: Log in to Fly registry
+      # ── Log in to GitHub Container Registry ──────────────────────────────────
+      - name: Log in to GitHub Container Registry
         if: steps.check.outputs.EXISTS == 'false'
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: |
-          echo "$FLY_API_TOKEN" | docker login registry.fly.io \
-            --username x --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # ── Build and push ────────────────────────────────────────────────────────
       - name: Build and push image
         if: steps.check.outputs.EXISTS == 'false'
         env:
-          FLY_REGISTRY_APP: ${{ vars.FLY_REGISTRY_APP }}
           SHA: ${{ steps.resolve.outputs.SHA }}
           TAG: ${{ steps.resolve.outputs.TAG }}
         run: |
-          IMAGE="registry.fly.io/${FLY_REGISTRY_APP}/openfront:${SHA}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/openfront:${SHA}"
 
           docker buildx build \
             --platform linux/amd64 \
             --build-arg GIT_COMMIT=$SHA \
             --build-arg GAME_ENV=prod \
+            --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" \
             --tag "$IMAGE" \
             --cache-from type=local,src=/tmp/.buildx-cache \
             --cache-to   type=local,dest=/tmp/.buildx-cache-new,mode=max \

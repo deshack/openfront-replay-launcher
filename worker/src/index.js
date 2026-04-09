@@ -3,7 +3,7 @@
  *
  * KV namespace binding:  SESSIONS   (key: matchId, value: JSON session)
  * Var bindings (set in wrangler.toml [vars]):
- *   FLY_REGISTRY_APP        Fly app name whose registry holds pre-built images  (e.g. "openfront-games")
+ *   GHCR_OWNER              GitHub username/org that owns the ghcr.io packages  (e.g. "deshack")
  * Secret bindings (set via wrangler secret put):
  *   FLY_API_TOKEN           Fly.io API token
  *   FLY_GAMES_APP           Fly app name for game machines    (e.g. "openfront-games")
@@ -79,7 +79,7 @@ async function handleLaunch(request, env, respond) {
     });
   }
 
-  const imageRef = `registry.fly.io/${env.FLY_REGISTRY_APP}/openfront:${sha}`;
+  const imageRef = `ghcr.io/${env.GHCR_OWNER}/openfront:${sha}`;
   let machine;
   try {
     machine = await createMachine(env, { matchId, sha, imageRef });
@@ -227,15 +227,21 @@ async function flyApi(env, method, path, body) {
   catch { throw new Error(`Fly API ${method} ${path} returned invalid JSON`); }
 }
 
-// ─── Fly registry check ───────────────────────────────────────────────────────
+// ─── ghcr.io registry check ───────────────────────────────────────────────────
 
 async function imageExistsInRegistry(env, sha) {
   try {
+    // Get anonymous pull token (works for public packages)
+    const tokenRes = await fetch(
+      `https://ghcr.io/token?service=ghcr.io&scope=repository:${env.GHCR_OWNER}/openfront:pull`
+    );
+    if (!tokenRes.ok) return false;
+    const { token } = await tokenRes.json();
     const res = await fetch(
-      `https://registry.fly.io/v2/${env.FLY_REGISTRY_APP}/openfront/manifests/${sha}`,
+      `https://ghcr.io/v2/${env.GHCR_OWNER}/openfront/manifests/${sha}`,
       {
         headers: {
-          Authorization: `Bearer ${env.FLY_API_TOKEN}`,
+          Authorization: `Bearer ${token}`,
           Accept: "application/vnd.docker.distribution.manifest.v2+json",
         },
       }

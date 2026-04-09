@@ -10,7 +10,7 @@ binding = "SESSIONS"
 id = "0e889a090a3a4753925b04daf4ec0a23"
 
 [vars]
-FLY_REGISTRY_APP = "openfront-games"
+GHCR_OWNER = "deshack"
 
 [observability]
 [observability.logs]

@@ -96,7 +96,7 @@ UI redirects user to /game/:matchId (Worker proxy → fly-replay → game machin
 ### Cloudflare Worker vars (`wrangler.toml [vars]`)
 | Name | Value |
 |---|---|
-| `FLY_REGISTRY_APP` | `openfront-games` |
+| `GHCR_OWNER` | GitHub username/org (e.g. `deshack`) |
 
 ### Cloudflare Worker secrets (`wrangler secret put`)
 | Name | Description |
@@ -114,17 +114,14 @@ UI redirects user to /game/:matchId (Worker proxy → fly-replay → game machin
 |---|---|
 | `FLY_API_TOKEN` | Fly.io API token |
 
-### GitHub Actions variables (non-secret)
-| Name | Description |
-|---|---|
-| `FLY_REGISTRY_APP` | `openfront-games` |
+GitHub Actions uses `GITHUB_TOKEN` (automatic) to push to ghcr.io — no variables or extra secrets needed.
 
 ---
 
 ## Key implementation details
 
-- **Image ref pattern:** `registry.fly.io/openfront-games/openfront:<sha>`
-- **Registry check** uses the Docker v2 manifest API: `GET https://registry.fly.io/v2/<app>/openfront/manifests/<sha>` with `Authorization: Bearer <FLY_API_TOKEN>`
+- **Image ref pattern:** `ghcr.io/<GHCR_OWNER>/openfront:<sha>`
+- **Registry check** uses ghcr.io's Docker v2 API with an anonymous pull token (two-step: `GET https://ghcr.io/token?...` → `GET https://ghcr.io/v2/<owner>/openfront/manifests/<sha>`). Works for public packages without credentials.
 - **OpenFrontIO's nginx** listens on port 80 inside the container — game machines use `internal_port: 80`
 - **Production SHA cache key** in KV: `__latest_release_sha__`, TTL 15 minutes; fails open (if GitHub unreachable, check is skipped)
 - **Build args** passed to `docker build` in GitHub Actions: `GIT_COMMIT=<sha>`, `GAME_ENV=prod`

@@ -8,17 +8,17 @@ openfrontio/OpenFrontIO publishes a tag
         ▼
 GitHub Actions (your repo, free)
         │  clones OpenFrontIO @ tag SHA
-        │  docker build + push → registry.fly.io
+        │  docker build + push → ghcr.io
         │  (once per release, ~3-5 min)
         ▼
-Image cached in Fly registry
+Image cached in GitHub Container Registry
 
 User requests match replay
         │
         ▼
 Cloudflare Worker
         │  resolves SHA from match API
-        │  checks Fly registry for pre-built image
+        │  checks ghcr.io for pre-built image
         │  if SHA matches latest release → redirect to production
         │  if no image → return "unavailable"
         │  otherwise: create game Machine from cached image
@@ -39,21 +39,20 @@ Game live in ~20 seconds
 
 ## Setup
 
-### 1. Create Fly apps
+### 1. Create Fly app
 
 ```sh
 fly apps create openfront-games
 ```
 
-### 2. Set GitHub Actions secrets and variables
+### 2. Set GitHub Actions secret
 
 In your repo → Settings → Secrets and variables → Actions:
 
 **Secrets:**
 - `FLY_API_TOKEN` — `fly tokens create deploy`
 
-**Variables** (non-sensitive):
-- `FLY_REGISTRY_APP` — `openfront-games`
+No variables needed — the workflow uses `GITHUB_TOKEN` (automatic) to push to ghcr.io.
 
 ### 3. Create the Cloudflare KV namespace
 
@@ -81,6 +80,8 @@ wrangler deploy
 
 Run the **Pre-build OpenFrontIO release image** workflow manually in GitHub Actions (Actions → select workflow → Run workflow). This builds and pushes the current latest release image so the first replay request is instant.
 
+After the first run, verify the `openfront` package is public: GitHub → your profile → Packages → openfront → Package settings → Change visibility → Public (should be public automatically for public repos, but worth confirming).
+
 ---
 
 ## File structure
@@ -102,10 +103,10 @@ Run the **Pre-build OpenFrontIO release image** workflow manually in GitHub Acti
 
 ## How image caching works
 
-Images are stored in Fly's registry under:
-`registry.fly.io/openfront-games/openfront:<sha>`
+Images are stored in GitHub Container Registry under:
+`ghcr.io/<owner>/openfront:<sha>`
 
-GitHub Actions polls OpenFrontIO releases daily. On a new tag it resolves the SHA, checks whether the image already exists in the registry, and builds + pushes if not. Matches replayed on released versions find their image already cached.
+GitHub Actions polls OpenFrontIO releases daily. On a new tag it resolves the SHA, checks whether the image already exists in ghcr.io, and builds + pushes if not. Matches replayed on released versions find their image already cached.
 
 If a match's SHA has no pre-built image (e.g. an in-progress development commit), the Worker returns `{ status: "unavailable" }`. Only released versions can be replayed.
 
@@ -116,8 +117,7 @@ If a match's SHA has no pre-built image (e.g. an in-progress development commit)
 | Resource | Cost |
 |---|---|
 | Cloudflare Worker + KV | Free |
-| GitHub Actions pre-builds | Free (public repo) |
+| GitHub Actions pre-builds + ghcr.io storage | Free (public repo) |
 | Game machine (shared-cpu-1x, 512MB, auto_destroy) | ~$0.004/session |
-| Fly registry storage | ~$0.02/GB/month |
 
-Monthly total at low volume: roughly **$0.50/month**.
+Monthly total at low volume: roughly **$0.02/month**.
