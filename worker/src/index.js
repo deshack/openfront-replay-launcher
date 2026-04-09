@@ -79,7 +79,7 @@ async function handleLaunch(request, env, respond) {
     });
   }
 
-  const imageRef = `ghcr.io/${env.GHCR_OWNER}/openfront:${sha}`;
+  const imageRef = `ghcr.io/${env.GHCR_OWNER}/openfront-replay-launcher:${sha}`;
   let machine;
   try {
     machine = await createMachine(env, { matchId, sha, imageRef });
@@ -233,12 +233,12 @@ async function imageExistsInRegistry(env, sha) {
   try {
     // Get anonymous pull token (works for public packages)
     const tokenRes = await fetch(
-      `https://ghcr.io/token?service=ghcr.io&scope=repository:${env.GHCR_OWNER}/openfront:pull`
+      `https://ghcr.io/token?service=ghcr.io&scope=repository:${env.GHCR_OWNER}/openfront-replay-launcher:pull`
     );
     if (!tokenRes.ok) return false;
     const { token } = await tokenRes.json();
     const res = await fetch(
-      `https://ghcr.io/v2/${env.GHCR_OWNER}/openfront/manifests/${sha}`,
+      `https://ghcr.io/v2/${env.GHCR_OWNER}/openfront-replay-launcher/manifests/${sha}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

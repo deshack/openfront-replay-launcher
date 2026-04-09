@@ -120,8 +120,8 @@ GitHub Actions uses `GITHUB_TOKEN` (automatic) to push to ghcr.io — no variabl
 
 ## Key implementation details
 
-- **Image ref pattern:** `ghcr.io/<GHCR_OWNER>/openfront:<sha>`
-- **Registry check** uses ghcr.io's Docker v2 API with an anonymous pull token (two-step: `GET https://ghcr.io/token?...` → `GET https://ghcr.io/v2/<owner>/openfront/manifests/<sha>`). Works for public packages without credentials.
+- **Image ref pattern:** `ghcr.io/<GHCR_OWNER>/openfront-replay-launcher:<sha>`
+- **Registry check** uses ghcr.io's Docker v2 API with an anonymous pull token (two-step: `GET https://ghcr.io/token?...` → `GET https://ghcr.io/v2/<owner>/openfront-replay-launcher/manifests/<sha>`). Works for public packages without credentials.
 - **OpenFrontIO's nginx** listens on port 80 inside the container — game machines use `internal_port: 80`
 - **Production SHA cache key** in KV: `__latest_release_sha__`, TTL 15 minutes; fails open (if GitHub unreachable, check is skipped)
 - **Build args** passed to `docker build` in GitHub Actions: `GIT_COMMIT=<sha>`, `GAME_ENV=prod`

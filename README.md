@@ -104,7 +104,7 @@ After the first run, verify the `openfront` package is public: GitHub → your p
 ## How image caching works
 
 Images are stored in GitHub Container Registry under:
-`ghcr.io/<owner>/openfront:<sha>`
+`ghcr.io/<owner>/openfront-replay-launcher:<sha>`
 
 GitHub Actions polls OpenFrontIO releases daily. On a new tag it resolves the SHA, checks whether the image already exists in ghcr.io, and builds + pushes if not. Matches replayed on released versions find their image already cached.
 

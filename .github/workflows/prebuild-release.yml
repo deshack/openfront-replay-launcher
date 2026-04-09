@@ -88,7 +88,7 @@ jobs:
             HTTP=$(curl -so /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer $TOKEN" \
               -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
-              "https://ghcr.io/v2/${OWNER}/openfront/manifests/${SHA}")
+              "https://ghcr.io/v2/${OWNER}/openfront-replay-launcher/manifests/${SHA}")
           else
             HTTP="000"
           fi
@@ -146,7 +146,7 @@ jobs:
           SHA: ${{ steps.resolve.outputs.SHA }}
           TAG: ${{ steps.resolve.outputs.TAG }}
         run: |
-          IMAGE="ghcr.io/${{ github.repository_owner }}/openfront:${SHA}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/openfront-replay-launcher:${SHA}"
 
           docker buildx build \
             --platform linux/amd64 \
