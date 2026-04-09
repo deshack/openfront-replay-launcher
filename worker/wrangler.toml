@@ -9,6 +9,9 @@ compatibility_date = "2024-09-23"
 binding = "SESSIONS"
 id = "0e889a090a3a4753925b04daf4ec0a23"
 
+[vars]
+FLY_REGISTRY_APP = "openfront-builder"
+
 [observability]
 [observability.logs]
 enabled = true
@@ -19,6 +22,3 @@ enabled = false
 # Secrets — set with:
 #   wrangler secret put FLY_API_TOKEN
 #   wrangler secret put FLY_GAMES_APP
-#   wrangler secret put FLY_BUILDER_APP
-#   wrangler secret put FLY_BUILDER_MACHINE_ID
-#   wrangler secret put CALLBACK_SECRET

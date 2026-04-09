@@ -2,12 +2,11 @@
  * Cloudflare Worker — OpenFrontIO Ephemeral Launcher
  *
  * KV namespace binding:  SESSIONS   (key: matchId, value: JSON session)
+ * Var bindings (set in wrangler.toml [vars]):
+ *   FLY_REGISTRY_APP        Fly app name whose registry holds pre-built images  (e.g. "openfront-builder")
  * Secret bindings (set via wrangler secret put):
  *   FLY_API_TOKEN           Fly.io API token
  *   FLY_GAMES_APP           Fly app name for game machines    (e.g. "openfront-games")
- *   FLY_BUILDER_APP         Fly app name for the builder      (e.g. "openfront-builder")
- *   FLY_BUILDER_MACHINE_ID  The fixed machine ID of the builder (from `fly machines list`)
- *   CALLBACK_SECRET         Shared secret for builder→worker callbacks
  */
 
 export default {
@@ -34,7 +33,6 @@ export default {
     if (request.method === "GET" && pathname === "/") return serveUI();
     if (request.method === "POST" && pathname === "/api/launch") return handleLaunch(request, env, respond);
     if (request.method === "GET"  && pathname.startsWith("/api/status/")) return handleStatus(request, env, respond);
-    if (request.method === "POST" && pathname === "/api/callback") return handleCallback(request, env, respond);
     if (request.method === "DELETE" && pathname.startsWith("/api/session/")) return handleDelete(request, env, respond);
     if (pathname.startsWith("/game/")) return handleGameProxy(request, env);
 
@@ -50,15 +48,9 @@ async function handleLaunch(request, env, respond) {
 
   // Return existing live session
   const existing = await getSession(env, matchId);
-  if (existing && !["error", "stopped"].includes(existing.status)) {
+  if (existing && !["error", "stopped", "unavailable"].includes(existing.status)) {
     return respond({ matchId, status: existing.status, url: existing.url, sha: existing.sha });
   }
-
-  // Prevent concurrent launches for the same matchId.
-  // KV has no atomic CAS, but this short-lived lock closes the race window.
-  const lockKey = `lock-${matchId}`;
-  if (await env.SESSIONS.get(lockKey)) return respond({ error: "Launch already in progress" }, 429);
-  await env.SESSIONS.put(lockKey, "1", { expirationTtl: 60 });
 
   // Fetch commit SHA from match API
   let sha;
@@ -79,23 +71,32 @@ async function handleLaunch(request, env, respond) {
     return respond({ matchId, sha, status: "production", url: gameUrl(matchId) });
   }
 
+  // Check if a pre-built image exists for this SHA
+  if (!await imageExistsInRegistry(env, sha)) {
+    return respond({
+      matchId, sha, status: "unavailable",
+      error: "No pre-built image for this game version. Only released versions can be replayed.",
+    });
+  }
+
+  const imageRef = `registry.fly.io/${env.FLY_REGISTRY_APP}/openfront:${sha}`;
+  let machine;
+  try {
+    machine = await createMachine(env, { matchId, sha, imageRef });
+  } catch (e) {
+    return respond({ error: `Failed to create game machine: ${e.message}` }, 502);
+  }
+
   const session = {
     matchId, sha,
-    status: "building",
+    status: "launching",
     url: null,
-    machineId: null,
+    machineId: machine.id,
     error: null,
     createdAt: Date.now(),
   };
   await putSession(env, matchId, session);
-
-  // Tell the builder (Fly app) to build+launch, fire and forget
-  const workerOrigin = new URL(request.url).origin;
-  triggerBuilder(env, { matchId, sha, callbackOrigin: workerOrigin }).catch(async (e) => {
-    await putSession(env, matchId, { ...session, status: "error", error: e.message });
-  });
-
-  return respond({ matchId, status: "building", sha });
+  return respond({ matchId, status: "launching", sha });
 }
 
 // ─── Fetch latest OpenFrontIO release SHA ─────────────────────────────────────
@@ -154,28 +155,27 @@ async function handleStatus(request, env, respond) {
   const matchId = new URL(request.url).pathname.split("/").pop();
   const session = await getSession(env, matchId);
   if (!session) return respond({ error: "Session not found" }, 404);
+
+  if (session.status === "launching" && session.machineId) {
+    try {
+      const machine = await flyApi(env, "GET",
+        `/apps/${env.FLY_GAMES_APP}/machines/${session.machineId}`);
+      if (machine.state === "started") {
+        const url = `${new URL(request.url).origin}/game/${matchId}`;
+        const updated = { ...session, status: "ready", url };
+        await putSession(env, matchId, updated);
+        return respond(updated);
+      }
+      if (["failed", "destroyed"].includes(machine.state)) {
+        const updated = { ...session, status: "error",
+          error: `Machine entered state: ${machine.state}` };
+        await putSession(env, matchId, updated);
+        return respond(updated);
+      }
+    } catch { /* fail open — return stale session */ }
+  }
+
   return respond(session);
-}
-
-// ─── POST /api/callback (called by the Fly builder) ──────────────────────────
-
-async function handleCallback(request, env, respond) {
-  const auth = request.headers.get("Authorization") ?? "";
-  if (auth !== `Bearer ${env.CALLBACK_SECRET}`) return respond({ error: "Forbidden" }, 403);
-
-  const { matchId, status, url, machineId, error } = await request.json().catch(() => ({}));
-  if (!matchId || !status) return respond({ error: "Bad body" }, 400);
-
-  const session = await getSession(env, matchId);
-  if (!session) return respond({ error: "Unknown session" }, 404);
-
-  // When the machine is ready, the canonical URL is the Worker-side proxy — not the raw Fly app
-  // URL the builder sends — so that every request is routed to the correct machine instance.
-  const resolvedUrl = (status === "ready" && machineId)
-    ? `${new URL(request.url).origin}/game/${matchId}`
-    : (url ?? session.url);
-  await putSession(env, matchId, { ...session, status, url: resolvedUrl, machineId: machineId ?? session.machineId, error: error ?? null });
-  return respond({ ok: true });
 }
 
 // ─── DELETE /api/session/:matchId ─────────────────────────────────────────────
@@ -209,73 +209,78 @@ async function putSession(env, matchId, session) {
   await env.SESSIONS.put(matchId, JSON.stringify(session), { expirationTtl: 60 * 60 * 3 });
 }
 
+// ─── Fly API helper ───────────────────────────────────────────────────────────
+
+async function flyApi(env, method, path, body) {
+  const opts = {
+    method,
+    headers: { Authorization: `Bearer ${env.FLY_API_TOKEN}`, "Content-Type": "application/json" },
+  };
+  if (body && method !== "GET") opts.body = JSON.stringify(body);
+  const res = await fetch(`https://api.machines.dev/v1${path}`, opts);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Fly API ${method} ${path} → ${res.status}: ${text}`);
+  }
+  const text = await res.text();
+  try { return text ? JSON.parse(text) : null; }
+  catch { throw new Error(`Fly API ${method} ${path} returned invalid JSON`); }
+}
+
+// ─── Fly registry check ───────────────────────────────────────────────────────
+
+async function imageExistsInRegistry(env, sha) {
+  try {
+    const res = await fetch(
+      `https://registry.fly.io/v2/${env.FLY_REGISTRY_APP}/openfront/manifests/${sha}`,
+      {
+        headers: {
+          Authorization: `Bearer ${env.FLY_API_TOKEN}`,
+          Accept: "application/vnd.docker.distribution.manifest.v2+json",
+        },
+      }
+    );
+    return res.ok;
+  } catch { return false; }
+}
+
 // ─── Fly Machines API ─────────────────────────────────────────────────────────
 
+async function createMachine(env, { matchId, sha, imageRef }) {
+  return flyApi(env, "POST", `/apps/${env.FLY_GAMES_APP}/machines`, {
+    name: `game-${sha.slice(0, 7)}-${Date.now()}`,
+    config: {
+      image: imageRef,
+      auto_destroy: true,
+      guest: { cpu_kind: "shared", cpus: 1, memory_mb: 512 },
+      services: [{
+        internal_port: 80,
+        protocol: "tcp",
+        ports: [
+          { port: 443, handlers: ["tls", "http"] },
+          { port: 80, handlers: ["http"] },
+        ],
+        autostop: true,
+        autostart: true,
+        min_machines_running: 0,
+      }],
+      env: { GAME_ENV: "prod", GIT_COMMIT: sha },
+      metadata: { match_id: matchId, commit_sha: sha },
+    },
+  });
+}
+
 async function destroyMachine(env, machineId) {
-  const base = `https://api.machines.dev/v1/apps/${env.FLY_GAMES_APP}/machines`;
-  const headers = { Authorization: `Bearer ${env.FLY_API_TOKEN}`, "Content-Type": "application/json" };
-  await fetch(`${base}/${machineId}/stop`, { method: "POST", headers });
+  const path = `/apps/${env.FLY_GAMES_APP}/machines/${machineId}`;
+  await flyApi(env, "POST", `${path}/stop`).catch(() => {});
   // Poll until stopped before issuing DELETE (up to 10s)
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
-    const m = await fetch(`${base}/${machineId}`, { headers }).then(r => r.json()).catch(() => null);
+    const m = await flyApi(env, "GET", path).catch(() => null);
     if (!m || m.state === "stopped" || m.state === "destroyed") break;
     await new Promise(r => setTimeout(r, 1000));
   }
-  await fetch(`${base}/${machineId}?kill=true`, { method: "DELETE", headers });
-}
-
-// ─── Trigger the builder Fly app ──────────────────────────────────────────────
-// The builder Machine is stopped when idle. We start it, wait for it to be
-// ready, then POST the build request to it.
-
-async function triggerBuilder(env, { matchId, sha, callbackOrigin }) {
-  const machineBase = `https://api.machines.dev/v1/apps/${env.FLY_BUILDER_APP}/machines/${env.FLY_BUILDER_MACHINE_ID}`;
-  const flyHeaders = {
-    Authorization: `Bearer ${env.FLY_API_TOKEN}`,
-    "Content-Type": "application/json",
-  };
-
-  // 1. Start the machine (no-op if already running)
-  await fetch(`${machineBase}/start`, { method: "POST", headers: flyHeaders });
-
-  // 2. Wait until machine state is "started" (up to 60s)
-  let machineStarted = false;
-  const deadline = Date.now() + 60_000;
-  while (Date.now() < deadline) {
-    const state = await fetch(machineBase, { headers: flyHeaders })
-      .then(r => r.json())
-      .then(m => m.state)
-      .catch(() => null);
-    if (state === "started") { machineStarted = true; break; }
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  if (!machineStarted) throw new Error("Builder machine did not reach started state within 60s");
-
-  // 3. Wait for the HTTP server inside to be ready (up to 30s more)
-  const builderUrl = `https://${env.FLY_BUILDER_APP}.fly.dev`;
-  let healthy = false;
-  const healthDeadline = Date.now() + 30_000;
-  while (Date.now() < healthDeadline) {
-    healthy = await fetch(`${builderUrl}/health`).then(r => r.ok).catch(() => false);
-    if (healthy) break;
-    await new Promise(r => setTimeout(r, 2000));
-  }
-  if (!healthy) throw new Error("Builder HTTP server did not become healthy within 30s");
-
-  // 4. Send the build request
-  const res = await fetch(`${builderUrl}/build`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.CALLBACK_SECRET}`,
-    },
-    body: JSON.stringify({ matchId, sha, callbackOrigin }),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Builder returned ${res.status}: ${text}`);
-  }
+  await flyApi(env, "DELETE", `${path}?kill=true`);
 }
 
 // ─── Production game URL ──────────────────────────────────────────────────────
@@ -395,21 +400,13 @@ input::placeholder{color:var(--muted);}
 .status-wrap.show{display:block;}
 .status-header{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;}
 .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;background:var(--muted);transition:background .3s;}
-.dot.building,.dot.launching{animation:blink 1.1s ease-in-out infinite;}
-.dot.building{background:var(--warn);}
-.dot.launching{background:#60a5fa;}
+.dot.launching{animation:blink 1.1s ease-in-out infinite;background:#60a5fa;}
 .dot.ready{background:var(--accent);}
 .dot.production{background:#a78bfa;}
 .dot.error{background:var(--err);}
+.dot.unavailable{background:var(--muted);}
 @keyframes blink{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.3;transform:scale(.6);}}
 .status-text{font-family:var(--mono);font-size:.8rem;color:var(--text);}
-.terminal{background:#060a0e;border:1px solid var(--border);border-radius:2px;
-  padding:1rem 1.1rem;font-family:var(--mono);font-size:.7rem;line-height:1.75;
-  color:var(--muted);max-height:180px;overflow-y:auto;}
-.line{animation:appear .2s ease;}
-.line.ok{color:var(--accent);}
-.line.err{color:var(--err);}
-@keyframes appear{from{opacity:0;transform:translateX(-4px);}to{opacity:1;transform:none;}}
 .meta{display:flex;gap:1.5rem;flex-wrap:wrap;margin-top:1rem;}
 .meta-item{display:flex;flex-direction:column;gap:.2rem;}
 .meta-label{font-family:var(--mono);font-size:.58rem;letter-spacing:.12em;
@@ -437,7 +434,6 @@ input::placeholder{color:var(--muted);}
         <div class="dot" id="dot"></div>
         <span class="status-text" id="st">Initializing...</span>
       </div>
-      <div class="terminal" id="term"></div>
       <div class="meta" id="meta"></div>
       <a class="go-btn" id="go" target="_blank" rel="noopener">Open Game Environment →</a>
     </div>
@@ -445,11 +441,18 @@ input::placeholder{color:var(--muted);}
 </div>
 <script>
 let poll;
+const INITIAL_DELAY  = 18_000;  // wait before first poll — machine takes ~20s
+const RETRY_INTERVAL = 2_000;   // fast retry cadence once we start checking
+const RETRY_PHASE    = 10_000;  // fast retry window after INITIAL_DELAY
+const BACKOFF_MULT   = 1.5;
+const MAX_INTERVAL   = 30_000;
+const POLL_TIMEOUT   = 180_000; // 3 minutes — give up after this
+
 const labels = {
-  building:    'Building game image — first time per commit, ~3-5 min…',
-  launching:   'Starting Fly Machine…',
+  launching:   'Starting game environment\u2026',
   ready:       'Environment ready!',
   production:  'This match runs on the current production version.',
+  unavailable: 'No pre-built image for this version \u2014 only released games can be replayed.',
   error:       'Something went wrong.',
   stopped:     'Environment stopped.',
 };
@@ -457,13 +460,12 @@ const labels = {
 async function launch() {
   const matchId = document.getElementById('mid').value.trim();
   if (!matchId) return;
-  clearInterval(poll);
+  clearTimeout(poll);
   document.getElementById('btn').disabled = true;
   document.getElementById('sw').className = 'status-wrap show';
-  document.getElementById('term').innerHTML = '';
   document.getElementById('meta').innerHTML = '';
   document.getElementById('go').className = 'go-btn';
-  setStatus('building', 'Contacting match API…');
+  setStatus('launching', 'Contacting match API\u2026');
 
   const res = await fetch('/api/launch', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -482,21 +484,53 @@ async function launch() {
   // Already ready (cached session)
   if (data.status === 'ready' && data.url) return handleReady(data.url);
 
-  // Poll for status
-  poll = setInterval(async () => {
+  // No pre-built image for this SHA
+  if (data.status === 'unavailable') {
+    setStatus('unavailable', labels.unavailable);
+    document.getElementById('btn').disabled = false;
+    return;
+  }
+
+  // Poll for status — wait for expected start time, then retry quickly, then back off
+  let pollStart = Date.now();
+  let backoffDelay = RETRY_INTERVAL;
+
+  function scheduleNext() {
+    const elapsed = Date.now() - pollStart;
+    if (elapsed >= POLL_TIMEOUT) {
+      setStatus('error', 'Timed out waiting for environment to start.');
+      document.getElementById('btn').disabled = false;
+      return;
+    }
+    let delay;
+    if (elapsed < INITIAL_DELAY) {
+      delay = INITIAL_DELAY - elapsed;
+    } else if (elapsed < INITIAL_DELAY + RETRY_PHASE) {
+      delay = RETRY_INTERVAL;
+    } else {
+      backoffDelay = Math.min(backoffDelay * BACKOFF_MULT, MAX_INTERVAL);
+      delay = backoffDelay;
+    }
+    poll = setTimeout(doPoll, delay);
+  }
+
+  async function doPoll() {
     const s = await fetch(\`/api/status/\${encodeURIComponent(matchId)}\`).then(r=>r.json()).catch(()=>null);
-    if (!s) return;
+    if (!s) { scheduleNext(); return; }
     setStatus(s.status, labels[s.status] ?? s.status);
-    if (s.status === 'ready' && s.url) { clearInterval(poll); handleReady(s.url); }
-    if (s.status === 'error') { clearInterval(poll); document.getElementById('btn').disabled=false; }
-  }, 3000);
+    if (s.status === 'ready' && s.url) { handleReady(s.url); return; }
+    if (s.status === 'error') { document.getElementById('btn').disabled=false; return; }
+    scheduleNext();
+  }
+
+  scheduleNext();
 }
 
 function handleProduction(url) {
   setStatus('production', 'This match runs on the current production version.');
   const go = document.getElementById('go');
   go.href = url;
-  go.textContent = 'Open in Production →';
+  go.textContent = 'Open in Production \u2192';
   go.className = 'go-btn show';
   document.getElementById('btn').disabled = false;
   setTimeout(() => window.open(url, '_blank'), 1200);
@@ -505,7 +539,7 @@ function handleProduction(url) {
 function handleReady(url) {
   const go = document.getElementById('go');
   go.href = url;
-  go.textContent = 'Open Game Environment →';
+  go.textContent = 'Open Game Environment \u2192';
   go.className = 'go-btn show';
   document.getElementById('btn').disabled = false;
   setTimeout(() => window.open(url, '_blank'), 1200);
