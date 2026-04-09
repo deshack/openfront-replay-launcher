@@ -235,7 +235,10 @@ async function imageExistsInRegistry(env, sha) {
     const tokenRes = await fetch(
       `https://ghcr.io/token?service=ghcr.io&scope=repository:${env.GHCR_OWNER}/openfront-replay-launcher:pull`
     );
-    if (!tokenRes.ok) return false;
+    if (!tokenRes.ok) {
+      console.error("ghcr.io anonymous pull token fetch failed:", tokenRes.status, tokenRes.statusText);
+      return false;
+    }
     const { token } = await tokenRes.json();
     const res = await fetch(
       `https://ghcr.io/v2/${env.GHCR_OWNER}/openfront-replay-launcher/manifests/${sha}`,
@@ -246,6 +249,9 @@ async function imageExistsInRegistry(env, sha) {
         },
       }
     );
+
+    console.debug("ghcr.io manifest check:", res.status, res.statusText);
+
     return res.ok;
   } catch { return false; }
 }
