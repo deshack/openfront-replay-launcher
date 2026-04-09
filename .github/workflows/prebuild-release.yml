@@ -28,9 +28,9 @@ jobs:
   check-and-build:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    concurrency:
-      group: prebuild-release
-      cancel-in-progress: false
+#    concurrency:
+#      group: prebuild-release
+#      cancel-in-progress: false
     permissions:
       contents: read
       packages: write
