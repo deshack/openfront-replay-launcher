@@ -162,7 +162,7 @@ async function handleStatus(request, env, respond) {
       const machine = await flyApi(env, "GET",
         `/apps/${env.FLY_GAMES_APP}/machines/${session.machineId}`);
       if (machine.state === "started") {
-        const url = `${new URL(request.url).origin}/game/${matchId}`;
+        const url = `https://${env.FLY_GAMES_APP}.fly.dev/w${simpleHash(matchId) % 2}/game/${matchId}`;
         const updated = { ...session, status: "ready", url };
         await putSession(env, matchId, updated);
         return respond(updated);
